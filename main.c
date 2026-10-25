@@ -20,6 +20,10 @@ typedef struct {
     int digit_for_letter[26];
     int digit_used[10];
     int cannot_be_zero[26];
+
+    /* Precomputed indices of letters in each decimal column (-1 = no digit). */
+    signed char column_letter[MAX_WORD_LENGTH][MAX_WORDS];
+    int max_length;
 } Puzzle;
 
 /* Measurement counters; they do not change the search algorithm. */
@@ -91,6 +95,18 @@ static int razbor_rebusa(const char *input, Puzzle *puzzle) {
         }
     }
 
+    /* Machine-independent optimization: perform indexing and position
+       calculations once, rather than at every recursive search step. */
+    memset(puzzle->column_letter, -1, sizeof(puzzle->column_letter));
+    for (int w = 0; w <= puzzle->addend_count; ++w) {
+        if (puzzle->lengths[w] > puzzle->max_length) {
+            puzzle->max_length = puzzle->lengths[w];
+        }
+        for (int col = 0; col < puzzle->lengths[w]; ++col) {
+            puzzle->column_letter[col][w] =
+                (signed char)(puzzle->words[w][puzzle->lengths[w] - col - 1] - 'A');
+        }
+    }
     return 1;
 }
 
@@ -154,12 +170,11 @@ static int brute_force(Puzzle *puzzle, int column, int word_index,
     }
 
     if (word_index < puzzle->addend_count) {
-        int pos = puzzle->lengths[word_index] - 1 - column;
-        if (pos < 0) {
+        int letter = puzzle->column_letter[column][word_index];
+        if (letter < 0) {
             return brute_force(puzzle, column, word_index + 1, sum, max_length);
         }
 
-        int letter = puzzle->words[word_index][pos] - 'A';
         int assigned_digit = puzzle->digit_for_letter[letter];
         if (assigned_digit >= 0) {
             return brute_force(puzzle, column, word_index + 1,
@@ -171,19 +186,17 @@ static int brute_force(Puzzle *puzzle, int column, int word_index,
            unknown digit is determined modulo 10.  A repeated occurrence of
            the unknown letter is excluded from this shortcut. */
         int forced_digit = -1;
-        int result_pos = puzzle->lengths[puzzle->addend_count] - 1 - column;
-        if (result_pos >= 0) {
-            int result_letter = puzzle->words[puzzle->addend_count][result_pos] - 'A';
+        int result_letter = puzzle->column_letter[column][puzzle->addend_count];
+        if (result_letter >= 0) {
             int known_result = puzzle->digit_for_letter[result_letter];
             if (known_result >= 0) {
                 int remaining_sum = 0;
                 int all_other_known = 1;
                 for (int w = word_index + 1; w < puzzle->addend_count; ++w) {
-                    int next_pos = puzzle->lengths[w] - 1 - column;
-                    if (next_pos < 0) {
+                    int next_letter = puzzle->column_letter[column][w];
+                    if (next_letter < 0) {
                         continue;
                     }
-                    int next_letter = puzzle->words[w][next_pos] - 'A';
                     if (next_letter == letter) {
                         all_other_known = 0;  /* coefficient would exceed 1 */
                         break;
@@ -228,16 +241,16 @@ static int brute_force(Puzzle *puzzle, int column, int word_index,
     /* Every addend digit in this column is now known. */
     int expected_digit = sum % 10;
     int next_carry = sum / 10;
-    int result_pos = puzzle->lengths[puzzle->addend_count] - 1 - column;
+    int result_letter = puzzle->column_letter[column][puzzle->addend_count];
 
-    if (result_pos < 0) {
+    if (result_letter < 0) {
         if (expected_digit != 0) {
             return 0;
         }
         return brute_force(puzzle, column + 1, 0, next_carry, max_length);
     }
 
-    int letter = puzzle->words[puzzle->addend_count][result_pos] - 'A';
+    int letter = result_letter;
     int assigned_digit = puzzle->digit_for_letter[letter];
     if (assigned_digit >= 0) {
         if (assigned_digit != expected_digit) {
@@ -304,13 +317,6 @@ char *solve_puzzle(const char *result) {
         return NULL;
     }
 
-    int max_length = 0;
-    for (int w = 0; w <= puzzle.addend_count; ++w) {
-        if (puzzle.lengths[w] > max_length) {
-            max_length = puzzle.lengths[w];
-        }
-    }
-
     /* Heuristic: with exactly two addends, an extra leading result
        column always contains the carry 1. Assign it before the search. */
     if (puzzle.addend_count == 2) {
@@ -325,7 +331,7 @@ char *solve_puzzle(const char *result) {
         }
     }
 
-    if (!brute_force(&puzzle, 0, 0, 0, max_length)) {
+    if (!brute_force(&puzzle, 0, 0, 0, puzzle.max_length)) {
         return NULL;
     }
 
