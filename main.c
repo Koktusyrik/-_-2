@@ -19,6 +19,7 @@ typedef struct {
     int letter_count;
     int digit_for_letter[26];
     int digit_used[10];
+    int cannot_be_zero[26];
 } Puzzle;
 
 /* Measurement counters; they do not change the search algorithm. */
@@ -75,6 +76,9 @@ static int razbor_rebusa(const char *input, Puzzle *puzzle) {
 
     int seen[26] = {0};
     for (int w = 0; w <= puzzle->addend_count; ++w) {
+        if (puzzle->lengths[w] > 1) {
+            puzzle->cannot_be_zero[puzzle->words[w][0] - 'A'] = 1;
+        }
         for (int i = 0; i < puzzle->lengths[w]; ++i) {
             int letter = puzzle->words[w][i] - 'A';
             if (!seen[letter]) {
@@ -144,7 +148,8 @@ static int brute_force(Puzzle *puzzle, int index) {
 
     int letter = puzzle->letters[index] - 'A';
     for (int digit = 0; digit <= 9; ++digit) {
-        if (puzzle->digit_used[digit]) {
+        if (puzzle->digit_used[digit] ||
+            (digit == 0 && puzzle->cannot_be_zero[letter])) {
             continue;
         }
 
