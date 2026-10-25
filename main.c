@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 
 #define MAX_SLAGAEMIH 7
 #define MAX_WORDS (MAX_SLAGAEMIH + 1)
@@ -19,6 +20,10 @@ typedef struct {
     int digit_for_letter[26];
     int digit_used[10];
 } Puzzle;
+
+/* Measurement counters; they do not change the search algorithm. */
+static unsigned long long recursive_calls = 0;
+static unsigned long long checked_combinations = 0;
 
 /* Read the puzzle and collect its distinct letters. */
 static int razbor_rebusa(const char *input, Puzzle *puzzle) {
@@ -131,7 +136,9 @@ static int is_correct_solution(const Puzzle *puzzle) {
 
 /* Basic brute force: assign digits to all letters, then check the sum. */
 static int brute_force(Puzzle *puzzle, int index) {
+    ++recursive_calls;
     if (index == puzzle->letter_count) {
+        ++checked_combinations;
         return is_correct_solution(puzzle);
     }
 
@@ -205,19 +212,46 @@ char *solve_puzzle(const char *result) {
 int main(void) {
     char result[MAX_INPUT_LENGTH];
 
-    printf("Enter a puzzle (SEND + MORE = MONEY):\n");
+    printf("Enter a puzzle (e.g. SEND + MORE = MONEY):\n");
     if (fgets(result, sizeof(result), stdin) == NULL) {
         fprintf(stderr, "Input error.\n");
         return 1;
     }
 
-    char *answer = solve_puzzle(result);
-    if (answer == NULL) {
-        printf("No solution found or invalid input.\n");
-        return 1;
-    }
+    /* Repeat fast runs until the total measured CPU time is large enough.
+       Search logic is unchanged; counters refer to one complete run. */
+    char *answer = NULL;
+    int repetitions = 0;
+    clock_t start_time = clock();
+
+    do {
+        recursive_calls = 0;
+        checked_combinations = 0;
+
+        char *current_answer = solve_puzzle(result);
+        if (current_answer == NULL) {
+            free(answer);
+            printf("No solution found or invalid input.\n");
+            return 1;
+        }
+
+        if (answer == NULL) {
+            answer = current_answer;
+        } else {
+            free(current_answer);
+        }
+        ++repetitions;
+    } while ((clock() - start_time) < CLOCKS_PER_SEC / 4 && repetitions < 100000);
+
+    clock_t end_time = clock();
+    double elapsed_ms = 1000.0 * (double)(end_time - start_time)
+                        / CLOCKS_PER_SEC / repetitions;
 
     printf("Solution: %s\n", answer);
+    printf("Average time: %.6f ms\n", elapsed_ms);
+    printf("Repetitions: %d\n", repetitions);
+    printf("Recursive calls: %llu\n", recursive_calls);
+    printf("Checked combinations: %llu\n", checked_combinations);
     free(answer);
     return 0;
 }
