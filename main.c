@@ -138,32 +138,90 @@ static int is_correct_solution(const Puzzle *puzzle) {
     return carry == 0;
 }
 
-/* Basic brute force: assign digits to all letters, then check the sum. */
-static int brute_force(Puzzle *puzzle, int index) {
+/* Assign digits column by column, from right to left.
+   sum starts with the carry from the previous column. */
+static int brute_force(Puzzle *puzzle, int column, int word_index,
+                       int sum, int max_length) {
     ++recursive_calls;
-    if (index == puzzle->letter_count) {
+
+    if (column == max_length) {
+        /* All columns have been checked; no carry may remain. */
+        if (sum != 0) {
+            return 0;
+        }
         ++checked_combinations;
         return is_correct_solution(puzzle);
     }
 
-    int letter = puzzle->letters[index] - 'A';
-    for (int digit = 0; digit <= 9; ++digit) {
-        if (puzzle->digit_used[digit] ||
-            (digit == 0 && puzzle->cannot_be_zero[letter])) {
-            continue;
+    if (word_index < puzzle->addend_count) {
+        int pos = puzzle->lengths[word_index] - 1 - column;
+        if (pos < 0) {
+            return brute_force(puzzle, column, word_index + 1, sum, max_length);
         }
 
-        puzzle->digit_for_letter[letter] = digit;
-        puzzle->digit_used[digit] = 1;
-
-        if (brute_force(puzzle, index + 1)) {
-            return 1;
+        int letter = puzzle->words[word_index][pos] - 'A';
+        int assigned_digit = puzzle->digit_for_letter[letter];
+        if (assigned_digit >= 0) {
+            return brute_force(puzzle, column, word_index + 1,
+                               sum + assigned_digit, max_length);
         }
 
-        puzzle->digit_used[digit] = 0;
-        puzzle->digit_for_letter[letter] = -1;
+        for (int digit = 0; digit <= 9; ++digit) {
+            if (puzzle->digit_used[digit] ||
+                (digit == 0 && puzzle->cannot_be_zero[letter])) {
+                continue;
+            }
+
+            puzzle->digit_for_letter[letter] = digit;
+            puzzle->digit_used[digit] = 1;
+
+            if (brute_force(puzzle, column, word_index + 1,
+                            sum + digit, max_length)) {
+                return 1;
+            }
+
+            puzzle->digit_used[digit] = 0;
+            puzzle->digit_for_letter[letter] = -1;
+        }
+        return 0;
     }
 
+    /* Every addend digit in this column is now known. */
+    int expected_digit = sum % 10;
+    int next_carry = sum / 10;
+    int result_pos = puzzle->lengths[puzzle->addend_count] - 1 - column;
+
+    if (result_pos < 0) {
+        if (expected_digit != 0) {
+            return 0;
+        }
+        return brute_force(puzzle, column + 1, 0, next_carry, max_length);
+    }
+
+    int letter = puzzle->words[puzzle->addend_count][result_pos] - 'A';
+    int assigned_digit = puzzle->digit_for_letter[letter];
+    if (assigned_digit >= 0) {
+        if (assigned_digit != expected_digit) {
+            return 0;
+        }
+        return brute_force(puzzle, column + 1, 0, next_carry, max_length);
+    }
+
+    if (puzzle->digit_used[expected_digit] ||
+        (expected_digit == 0 && puzzle->cannot_be_zero[letter])) {
+        return 0;
+    }
+
+    /* The result digit is determined by the current column. */
+    puzzle->digit_for_letter[letter] = expected_digit;
+    puzzle->digit_used[expected_digit] = 1;
+
+    if (brute_force(puzzle, column + 1, 0, next_carry, max_length)) {
+        return 1;
+    }
+
+    puzzle->digit_used[expected_digit] = 0;
+    puzzle->digit_for_letter[letter] = -1;
     return 0;
 }
 
@@ -207,7 +265,14 @@ char *solve_puzzle(const char *result) {
         return NULL;
     }
 
-    if (!brute_force(&puzzle, 0)) {
+    int max_length = 0;
+    for (int w = 0; w <= puzzle.addend_count; ++w) {
+        if (puzzle.lengths[w] > max_length) {
+            max_length = puzzle.lengths[w];
+        }
+    }
+
+    if (!brute_force(&puzzle, 0, 0, 0, max_length)) {
         return NULL;
     }
 
