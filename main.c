@@ -166,8 +166,47 @@ static int brute_force(Puzzle *puzzle, int column, int word_index,
                                sum + assigned_digit, max_length);
         }
 
+        /* Heuristic (forward checking): if the result digit is already known
+           and all other addend digits in this column are assigned, the last
+           unknown digit is determined modulo 10.  A repeated occurrence of
+           the unknown letter is excluded from this shortcut. */
+        int forced_digit = -1;
+        int result_pos = puzzle->lengths[puzzle->addend_count] - 1 - column;
+        if (result_pos >= 0) {
+            int result_letter = puzzle->words[puzzle->addend_count][result_pos] - 'A';
+            int known_result = puzzle->digit_for_letter[result_letter];
+            if (known_result >= 0) {
+                int remaining_sum = 0;
+                int all_other_known = 1;
+                for (int w = word_index + 1; w < puzzle->addend_count; ++w) {
+                    int next_pos = puzzle->lengths[w] - 1 - column;
+                    if (next_pos < 0) {
+                        continue;
+                    }
+                    int next_letter = puzzle->words[w][next_pos] - 'A';
+                    if (next_letter == letter) {
+                        all_other_known = 0;  /* coefficient would exceed 1 */
+                        break;
+                    }
+                    int value = puzzle->digit_for_letter[next_letter];
+                    if (value < 0) {
+                        all_other_known = 0;
+                        break;
+                    }
+                    remaining_sum += value;
+                }
+                if (all_other_known) {
+                    forced_digit = (known_result - sum - remaining_sum) % 10;
+                    if (forced_digit < 0) {
+                        forced_digit += 10;
+                    }
+                }
+            }
+        }
+
         for (int digit = 0; digit <= 9; ++digit) {
-            if (puzzle->digit_used[digit] ||
+            if ((forced_digit >= 0 && digit != forced_digit) ||
+                puzzle->digit_used[digit] ||
                 (digit == 0 && puzzle->cannot_be_zero[letter])) {
                 continue;
             }
@@ -269,6 +308,20 @@ char *solve_puzzle(const char *result) {
     for (int w = 0; w <= puzzle.addend_count; ++w) {
         if (puzzle.lengths[w] > max_length) {
             max_length = puzzle.lengths[w];
+        }
+    }
+
+    /* Heuristic: with exactly two addends, an extra leading result
+       column always contains the carry 1. Assign it before the search. */
+    if (puzzle.addend_count == 2) {
+        int max_addend_length = puzzle.lengths[0];
+        if (puzzle.lengths[1] > max_addend_length) {
+            max_addend_length = puzzle.lengths[1];
+        }
+        if (puzzle.lengths[2] == max_addend_length + 1) {
+            int leading = puzzle.words[2][0] - 'A';
+            puzzle.digit_for_letter[leading] = 1;
+            puzzle.digit_used[1] = 1;
         }
     }
 
